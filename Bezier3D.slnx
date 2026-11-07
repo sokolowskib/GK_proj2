@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Bezier3D.App/Bezier3D.App.csproj" />
+    <Project Path="src/Bezier3D.Core/Bezier3D.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Bezier3D.Core.Tests/Bezier3D.Core.Tests.csproj" />
+  </Folder>
+</Solution>
