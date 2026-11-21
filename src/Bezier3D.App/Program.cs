@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Bezier3D.Core.Maths;
+using Bezier3D.Core.Rendering;
 using Bezier3D.Core.Surfaces;
 using ImGuiNET;
 using Raylib_cs;
@@ -30,6 +31,13 @@ rlImGui.EndInitImGui();
 
 bool showControlNet = true;
 bool showMesh = true;
+bool showFill = true;
+
+var frame = new FrameBuffer(CanvasSize, CanvasSize);
+// tekstura w karcie graficznej, do której co klatkę wgrywamy frame.Color
+var canvasTex = Raylib.LoadTextureFromImage(Raylib.GenImageColor(CanvasSize, CanvasSize, Color.White));
+// bez oświetlenia jeden kolor zlałby obie powierzchnie w plamę — każda dostaje swój (dzień 4: światło)
+uint[] surfaceColors = [FrameBuffer.Rgba(230, 120, 40), FrameBuffer.Rgba(40, 150, 160)];
 int n = 10;
 var meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
 
@@ -80,6 +88,16 @@ while (!Raylib.WindowShouldClose())
     Raylib.BeginDrawing();
     Raylib.ClearBackground(Color.RayWhite);
 
+    if (showFill)
+    {
+        frame.Clear(FrameBuffer.Rgba(245, 245, 245));
+        for (int s = 0; s < meshes.Count; s++)
+            foreach (var t in meshes[s])
+                FillTriangle(frame, t, surfaceColors[s % surfaceColors.Length]); // % — więcej powierzchni niż kolorów
+        Raylib.UpdateTexture(canvasTex, frame.Color);
+        Raylib.DrawTexture(canvasTex, 0, 0, Color.White);
+    }
+
     if (showMesh)
         foreach (var mesh in meshes)
             DrawMesh(mesh);
@@ -95,6 +113,7 @@ while (!Raylib.WindowShouldClose())
     ImGui.Text($"FPS: {Raylib.GetFPS()}");
     ImGui.Text($"Powierzchnie: {surfaces.Count}");
     ImGui.SeparatorText("Rysowanie");
+    ImGui.Checkbox("Wypełnienie", ref showFill);
     ImGui.Checkbox("Wielobok Béziera", ref showControlNet);
     ImGui.Checkbox("Siatka trójkątów", ref showMesh);
     // SliderInt zwraca true tylko w klatce, w której wartość się zmieniła
@@ -109,12 +128,28 @@ while (!Raylib.WindowShouldClose())
     Raylib.EndDrawing();
 }
 
+Raylib.UnloadTexture(canvasTex);
 rlImGui.Shutdown();
 Raylib.CloseWindow();
 return 0;
 
 // Rzut prostokątny: odrzucamy z; początek układu w środku płótna, oś y w górę.
 static Vector2 ToScreen(Vector3 p) => new(CanvasSize / 2f + p.X, CanvasSize / 2f - p.Y);
+
+static void FillTriangle(FrameBuffer frame, Triangle t, uint color)
+{
+    Vector2 a = ToScreen(t.A.Pr), b = ToScreen(t.B.Pr), c = ToScreen(t.C.Pr);
+    TriangleFiller.Fill(a, b, c, (y, x0, x1) =>
+    {
+        for (int x = x0; x < x1; x++)
+        {
+            // wagi w środku piksela — ta sama reguła co w Fill
+            var w = Barycentric.Compute(a, b, c, new Vector2(x + 0.5f, y + 0.5f));
+            float z = Barycentric.Interpolate(w, t.A.Pr.Z, t.B.Pr.Z, t.C.Pr.Z);
+            frame.SetPixel(x, y, z, color);
+        }
+    });
+}
 
 static void DrawControlNet(BezierSurface s, Mat3 r)
 {
