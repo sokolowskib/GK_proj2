@@ -1,4 +1,5 @@
 using System.Numerics;
+using Bezier3D.Core.Maths;
 
 namespace Bezier3D.Core.Surfaces;
 
@@ -12,6 +13,15 @@ public sealed class MeshVertex
 
     // po obrocie — liczone przy każdej zmianie orientacji
     public Vector3 Pr, Pur, Pvr, Nr;
+
+    /// <summary>Pr = R·P, Pur = R·Pu, Pvr = R·Pv, Nr = normalize(R·N) — zawsze od oryginałów.</summary>
+    public void Rotate(Mat3 r)
+    {
+        Pr = r * P;
+        Pur = r * Pu;
+        Pvr = r * Pv;
+        Nr = Vector3.Normalize(r * N);
+    }
 }
 
 /// <summary>Trójkąt wskazuje na wierzchołki współdzielone z sąsiadami (nie kopie).</summary>

@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Bezier3D.Core.Maths;
 using Bezier3D.Core.Surfaces;
 using ImGuiNET;
 using Raylib_cs;
@@ -28,15 +29,64 @@ LoadFont("JetBrainsMono-Regular.ttf", 16f);
 rlImGui.EndInitImGui();
 
 bool showControlNet = true;
+bool showMesh = true;
+int n = 10;
+var meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
+
+var R = Mat3.Identity;     // cała orientacja sceny
+bool dragging = false;     // czy trzymamy LPM na płótnie
+Vector3 p0 = default;      // punkt na kuli z poprzedniej klatki
+var center = new Vector2(CanvasSize / 2f);
+float radius = CanvasSize / 2f;
+
+// Wierzchołki współdzielone obracają się kilka razy, ale Rotate liczy od P, więc wynik ten sam.
+void RotateAll()
+{
+    foreach (var mesh in meshes)
+        foreach (var t in mesh)
+        {
+            t.A.Rotate(R); t.B.Rotate(R); t.C.Rotate(R);
+        }
+}
+
+RotateAll();
 
 while (!Raylib.WindowShouldClose())
 {
+    var mouse = Raylib.GetMousePosition();
+    // tylko kliknięcie na płótnie — przesuwanie suwaka w panelu nie obraca sceny
+    if (Raylib.IsMouseButtonPressed(MouseButton.Left) && mouse.X < CanvasSize)
+    {
+        dragging = true;
+        p0 = Arcball.MapToSphere(mouse, center, radius);
+    }
+    if (Raylib.IsMouseButtonReleased(MouseButton.Left))
+        dragging = false;
+
+    if (dragging)
+    {
+        var p1 = Arcball.MapToSphere(mouse, center, radius);
+        R = Arcball.Increment(p0, p1) * R; // przyrost z lewej: obrót w układzie ekranu
+        p0 = p1;
+        RotateAll();
+    }
+
+    if (Raylib.IsKeyPressed(KeyboardKey.R))
+    {
+        R = Mat3.Identity;
+        RotateAll();
+    }
+
     Raylib.BeginDrawing();
     Raylib.ClearBackground(Color.RayWhite);
 
+    if (showMesh)
+        foreach (var mesh in meshes)
+            DrawMesh(mesh);
+
     if (showControlNet)
         foreach (var s in surfaces)
-            DrawControlNet(s);
+            DrawControlNet(s, R);
 
     rlImGui.Begin();
     ImGui.SetNextWindowPos(new Vector2(CanvasSize, 0));
@@ -46,6 +96,13 @@ while (!Raylib.WindowShouldClose())
     ImGui.Text($"Powierzchnie: {surfaces.Count}");
     ImGui.SeparatorText("Rysowanie");
     ImGui.Checkbox("Wielobok Béziera", ref showControlNet);
+    ImGui.Checkbox("Siatka trójkątów", ref showMesh);
+    // SliderInt zwraca true tylko w klatce, w której wartość się zmieniła
+    if (ImGui.SliderInt("Dokładność n", ref n, 1, 40))
+    {
+        meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
+        RotateAll(); // nowe wierzchołki mają puste Pr
+    }
     ImGui.End();
     rlImGui.End();
 
@@ -59,18 +116,29 @@ return 0;
 // Rzut prostokątny: odrzucamy z; początek układu w środku płótna, oś y w górę.
 static Vector2 ToScreen(Vector3 p) => new(CanvasSize / 2f + p.X, CanvasSize / 2f - p.Y);
 
-static void DrawControlNet(BezierSurface s)
+static void DrawControlNet(BezierSurface s, Mat3 r)
 {
     for (int i = 0; i < 4; i++)
         for (int j = 0; j < 4; j++)
         {
-            var p = ToScreen(s.V[i, j]);
+            var p = ToScreen(r * s.V[i, j]);
             if (i < 3)
-                Raylib.DrawLineV(p, ToScreen(s.V[i + 1, j]), Color.DarkGray);
+                Raylib.DrawLineV(p, ToScreen(r * s.V[i + 1, j]), Color.DarkGray);
             if (j < 3)
-                Raylib.DrawLineV(p, ToScreen(s.V[i, j + 1]), Color.DarkGray);
+                Raylib.DrawLineV(p, ToScreen(r * s.V[i, j + 1]), Color.DarkGray);
             Raylib.DrawCircleV(p, 4, Color.DarkGreen);
         }
+}
+
+static void DrawMesh(List<Triangle> mesh)
+{
+    foreach (var t in mesh)
+    {
+        Vector2 a = ToScreen(t.A.Pr), b = ToScreen(t.B.Pr), c = ToScreen(t.C.Pr);
+        Raylib.DrawLineV(a, b, Color.SkyBlue);
+        Raylib.DrawLineV(b, c, Color.SkyBlue);
+        Raylib.DrawLineV(c, a, Color.SkyBlue);
+    }
 }
 
 // Domyślna czcionka ImGui ma tylko ASCII — ładujemy TTF z polskimi literami (Latin Extended-A), greką i typografią.
