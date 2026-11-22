@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Bezier3D.Core.Lighting;
 using Bezier3D.Core.Maths;
 using Bezier3D.Core.Rendering;
 using Bezier3D.Core.Surfaces;
@@ -45,7 +46,13 @@ int m = 10;
 var lightColor = Vector3.One;               // domyślnie białe
 var objectColor = new Vector3(1f, 0.55f, 0.2f);
 bool useTexture = false;
-var lightPos = new Vector3(0, 0, 400);      // nad środkiem sceny; dzień 5: ruch po krzywej
+var lightPath = DefaultLightPath();
+float lightT = 0;                           // parametr krzywej, rośnie z czasem i zawija się po 1
+const float LightSpeed = 0.1f;              // okrążenie co 10 s
+bool lightPaused = false;
+bool editPath = false;
+int draggedPoint = -1;                      // indeks przeciąganego punktu krzywej, −1 = żaden
+var lightPos = lightPath.At(0);
 var texture = LoadTexture(Path.Combine(AppContext.BaseDirectory, "Assets", "texture.png"));
 int n = 10;
 var meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
@@ -74,11 +81,21 @@ while (!Raylib.WindowShouldClose())
     // tylko kliknięcie na płótnie — przesuwanie suwaka w panelu nie obraca sceny
     if (Raylib.IsMouseButtonPressed(MouseButton.Left) && mouse.X < CanvasSize)
     {
-        dragging = true;
+        // w trybie edycji kliknięcie blisko punktu krzywej łapie punkt; w innym miejscu nadal obracamy scenę
+        draggedPoint = editPath
+            ? lightPath.Points.FindIndex(q => Vector2.Distance(ToScreen(new Vector3(q, 0)), mouse) < 10)
+            : -1;
+        dragging = draggedPoint < 0;
         p0 = Arcball.MapToSphere(mouse, center, radius);
     }
     if (Raylib.IsMouseButtonReleased(MouseButton.Left))
+    {
         dragging = false;
+        draggedPoint = -1;
+    }
+
+    if (draggedPoint >= 0)
+        lightPath.Points[draggedPoint] = new(mouse.X - CanvasSize / 2f, CanvasSize / 2f - mouse.Y); // odwrotność ToScreen
 
     if (dragging)
     {
@@ -87,6 +104,12 @@ while (!Raylib.WindowShouldClose())
         p0 = p1;
         RotateAll();
     }
+
+    if (Raylib.IsKeyPressed(KeyboardKey.Space))
+        lightPaused = !lightPaused;
+    if (!lightPaused)
+        lightT = (lightT + Raylib.GetFrameTime() * LightSpeed) % 1;
+    lightPos = lightPath.At(lightT);
 
     if (Raylib.IsKeyPressed(KeyboardKey.R))
     {
@@ -114,6 +137,8 @@ while (!Raylib.WindowShouldClose())
     if (showControlNet)
         foreach (var s in surfaces)
             DrawControlNet(s, R);
+
+    DrawLightPath(lightPath, lightPos, editPath);
 
     rlImGui.Begin();
     ImGui.SetNextWindowPos(new Vector2(CanvasSize, 0));
@@ -144,6 +169,11 @@ while (!Raylib.WindowShouldClose())
         useTexture = true;
     if (!useTexture)
         ImGui.ColorEdit3("Kolor obiektu", ref objectColor);
+    ImGui.SeparatorText("Ruch światła");
+    ImGui.Checkbox("Pauza (Spacja)", ref lightPaused);
+    // ujemne z: światło za sceną, oświetla spód powierzchni
+    ImGui.SliderFloat("z światła", ref lightPath.Z, -500, 500);
+    ImGui.Checkbox("Edycja krzywej", ref editPath);
     ImGui.End();
     rlImGui.End();
 
@@ -212,6 +242,37 @@ static void DrawControlNet(BezierSurface s, Mat3 r)
                 Raylib.DrawLineV(p, ToScreen(r * s.V[i, j + 1]), Color.DarkGray);
             Raylib.DrawCircleV(p, 4, Color.DarkGreen);
         }
+}
+
+// Domyślny tor: 6 punktów na okręgu + punkt startowy w połowie między ostatnim a pierwszym.
+// Ostatni, start i pierwszy leżą na jednej prostej → brak „rogu” w miejscu zamknięcia.
+static LightPath DefaultLightPath()
+{
+    const int Count = 6;
+    const float Radius = 380; // krzywa wychodzi wyraźnie mniejsza niż wielokąt kontrolny (~140–330)
+    var ring = Enumerable.Range(0, Count)
+                         .Select(i => Radius * new Vector2(MathF.Cos(MathF.Tau * i / Count), MathF.Sin(MathF.Tau * i / Count)))
+                         .ToList();
+    return new([(ring[^1] + ring[0]) / 2, .. ring], 400);
+}
+
+static void DrawLightPath(LightPath path, Vector3 light, bool editing)
+{
+    const int Segments = 100;
+    for (int i = 0; i < Segments; i++)
+        Raylib.DrawLineV(ToScreen(path.At(i / (float)Segments)), ToScreen(path.At((i + 1) / (float)Segments)), Color.Orange);
+
+    if (editing)
+        for (int i = 0; i < path.Points.Count; i++)
+        {
+            var q = ToScreen(new Vector3(path.Points[i], 0));
+            Raylib.DrawLineV(q, ToScreen(new Vector3(path.Points[(i + 1) % path.Points.Count], 0)), Color.Gray);
+            Raylib.DrawCircleV(q, 6, Color.Maroon);
+        }
+
+    var l = ToScreen(light);
+    Raylib.DrawCircleV(l, 9, Color.Black);
+    Raylib.DrawCircleV(l, 7, Color.Yellow);
 }
 
 static void DrawMesh(List<Triangle> mesh)
