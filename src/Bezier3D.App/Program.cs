@@ -6,6 +6,9 @@ using Bezier3D.Core.Surfaces;
 using ImGuiNET;
 using Raylib_cs;
 using rlImGui_cs;
+// Raylib_cs ma własne Shader i Texture — bierzemy nasze
+using Shader = Bezier3D.Core.Rendering.Shader;
+using Texture = Bezier3D.Core.Rendering.Texture;
 
 const int CanvasSize = 800;
 const int PanelWidth = 300;
@@ -36,8 +39,14 @@ bool showFill = true;
 var frame = new FrameBuffer(CanvasSize, CanvasSize);
 // tekstura w karcie graficznej, do której co klatkę wgrywamy frame.Color
 var canvasTex = Raylib.LoadTextureFromImage(Raylib.GenImageColor(CanvasSize, CanvasSize, Color.White));
-// bez oświetlenia jeden kolor zlałby obie powierzchnie w plamę — każda dostaje swój (dzień 4: światło)
-uint[] surfaceColors = [FrameBuffer.Rgba(230, 120, 40), FrameBuffer.Rgba(40, 150, 160)];
+// oświetlenie — kolory jako (R, G, B) w zakresie 0–1
+float kd = 0.5f, ks = 0.5f;
+int m = 10;
+var lightColor = Vector3.One;               // domyślnie białe
+var objectColor = new Vector3(1f, 0.55f, 0.2f);
+bool useTexture = false;
+var lightPos = new Vector3(0, 0, 400);      // nad środkiem sceny; dzień 5: ruch po krzywej
+var texture = LoadTexture(Path.Combine(AppContext.BaseDirectory, "Assets", "texture.png"));
 int n = 10;
 var meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
 
@@ -91,9 +100,9 @@ while (!Raylib.WindowShouldClose())
     if (showFill)
     {
         frame.Clear(FrameBuffer.Rgba(245, 245, 245));
-        for (int s = 0; s < meshes.Count; s++)
-            foreach (var t in meshes[s])
-                FillTriangle(frame, t, surfaceColors[s % surfaceColors.Length]); // % — więcej powierzchni niż kolorów
+        foreach (var mesh in meshes)
+            foreach (var t in mesh)
+                FillTriangle(t);
         Raylib.UpdateTexture(canvasTex, frame.Color);
         Raylib.DrawTexture(canvasTex, 0, 0, Color.White);
     }
@@ -122,6 +131,19 @@ while (!Raylib.WindowShouldClose())
         meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
         RotateAll(); // nowe wierzchołki mają puste Pr
     }
+    ImGui.SeparatorText("Oświetlenie");
+    ImGui.SliderFloat("kd", ref kd, 0, 1);
+    ImGui.SliderFloat("ks", ref ks, 0, 1);
+    ImGui.SliderInt("m", ref m, 1, 100);
+    ImGui.ColorEdit3("Kolor światła", ref lightColor);
+    ImGui.Text("Kolor obiektu:");
+    if (ImGui.RadioButton("Jednolity", !useTexture))
+        useTexture = false;
+    ImGui.SameLine();
+    if (ImGui.RadioButton("Tekstura", useTexture))
+        useTexture = true;
+    if (!useTexture)
+        ImGui.ColorEdit3("Kolor obiektu", ref objectColor);
     ImGui.End();
     rlImGui.End();
 
@@ -136,7 +158,8 @@ return 0;
 // Rzut prostokątny: odrzucamy z; początek układu w środku płótna, oś y w górę.
 static Vector2 ToScreen(Vector3 p) => new(CanvasSize / 2f + p.X, CanvasSize / 2f - p.Y);
 
-static void FillTriangle(FrameBuffer frame, Triangle t, uint color)
+// nie static: korzysta z parametrów światła i koloru obiektu z panelu
+void FillTriangle(Triangle t)
 {
     Vector2 a = ToScreen(t.A.Pr), b = ToScreen(t.B.Pr), c = ToScreen(t.C.Pr);
     TriangleFiller.Fill(a, b, c, (y, x0, x1) =>
@@ -146,9 +169,35 @@ static void FillTriangle(FrameBuffer frame, Triangle t, uint color)
             // wagi w środku piksela — ta sama reguła co w Fill
             var w = Barycentric.Compute(a, b, c, new Vector2(x + 0.5f, y + 0.5f));
             float z = Barycentric.Interpolate(w, t.A.Pr.Z, t.B.Pr.Z, t.C.Pr.Z);
-            frame.SetPixel(x, y, z, color);
+            // średnia wektorów jednostkowych jest krótsza niż 1 → normalizacja po interpolacji
+            var N = Vector3.Normalize(Barycentric.Interpolate(w, t.A.Nr, t.B.Nr, t.C.Nr));
+            var P = Barycentric.Interpolate(w, t.A.Pr, t.B.Pr, t.C.Pr);
+            var IO = useTexture
+                ? texture.Sample(Barycentric.Interpolate(w, t.A.U, t.B.U, t.C.U),
+                                 Barycentric.Interpolate(w, t.A.V, t.B.V, t.C.V))
+                : objectColor;
+            var I = Shader.Shade(N, P, lightPos, lightColor, IO, kd, ks, m);
+            frame.SetPixel(x, y, z, FrameBuffer.Rgba((byte)(I.X * 255), (byte)(I.Y * 255), (byte)(I.Z * 255)));
         }
     });
+}
+
+// Obraz z pliku → Texture z kolorami 0–1. GetImageColor po pikselu: wolniej, ale bez unsafe, a wczytujemy raz.
+static Texture LoadTexture(string path)
+{
+    var img = Raylib.LoadImage(path);
+    // Raylib czyta PNG (BMP, TGA), ale nie JPG — przy złym pliku zwraca pusty obraz
+    if (!Raylib.IsImageValid(img))
+        throw new IOException($"Nie udało się wczytać obrazu: {path}");
+    var pixels = new Vector3[img.Width * img.Height];
+    for (int y = 0; y < img.Height; y++)
+        for (int x = 0; x < img.Width; x++)
+        {
+            var c = Raylib.GetImageColor(img, x, y);
+            pixels[y * img.Width + x] = new Vector3(c.R, c.G, c.B) / 255f;
+        }
+    Raylib.UnloadImage(img);
+    return new(img.Width, img.Height, pixels);
 }
 
 static void DrawControlNet(BezierSurface s, Mat3 r)
