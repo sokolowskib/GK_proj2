@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Bezier3D.Core.Lighting;
 using Bezier3D.Core.Maths;
 using Bezier3D.Core.Rendering;
+using Bezier3D.App.UI;
 using Bezier3D.Core.Surfaces;
 using ImGuiNET;
 using Raylib_cs;
@@ -33,6 +34,7 @@ ImGui.StyleColorsDark();
 LoadFont("JetBrainsMono-Regular.ttf", 16f);
 rlImGui.EndInitImGui();
 
+var help = new HelpWindow();
 bool showControlNet = true;
 bool showMesh = true;
 bool showFill = true;
@@ -54,6 +56,10 @@ bool editPath = false;
 int draggedPoint = -1;                      // indeks przeciąganego punktu krzywej, −1 = żaden
 var lightPos = lightPath.At(0);
 var texture = LoadTexture(Path.Combine(AppContext.BaseDirectory, "Assets", "texture.png"));
+bool useNormalMap = false;
+var normalMap = LoadTexture(Path.Combine(AppContext.BaseDirectory, "Assets", "Tiles101_1K-PNG_NormalDX.png"));
+bool dropAsNormalMap = false;               // czym jest plik przeciągnięty na okno
+string dropMessage = "";
 int n = 10;
 var meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
 
@@ -105,6 +111,25 @@ while (!Raylib.WindowShouldClose())
         RotateAll();
     }
 
+    if (Raylib.IsFileDropped())
+    {
+        string path = Raylib.GetDroppedFiles()[0];
+        try
+        {
+            var loaded = LoadTexture(path);
+            // od razu włączamy to, co podmieniliśmy — widać efekt bez szukania checkboxa
+            if (dropAsNormalMap)
+                (normalMap, useNormalMap) = (loaded, true);
+            else
+                (texture, useTexture) = (loaded, true);
+            dropMessage = $"Wczytano: {Path.GetFileName(path)}";
+        }
+        catch (IOException e)
+        {
+            dropMessage = e.Message; // zły plik nie zamyka programu
+        }
+    }
+
     if (Raylib.IsKeyPressed(KeyboardKey.Space))
         lightPaused = !lightPaused;
     if (!lightPaused)
@@ -145,6 +170,8 @@ while (!Raylib.WindowShouldClose())
     ImGui.SetNextWindowSize(new Vector2(PanelWidth, CanvasSize));
     ImGui.Begin("Bezier3D", ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse);
     ImGui.Text($"FPS: {Raylib.GetFPS()}");
+    if (ImGui.Button("Pomoc (F1)"))
+        help.Toggle();
     ImGui.Text($"Powierzchnie: {surfaces.Count}");
     ImGui.SeparatorText("Rysowanie");
     ImGui.Checkbox("Wypełnienie", ref showFill);
@@ -169,12 +196,23 @@ while (!Raylib.WindowShouldClose())
         useTexture = true;
     if (!useTexture)
         ImGui.ColorEdit3("Kolor obiektu", ref objectColor);
+    ImGui.Checkbox("Mapa normalnych", ref useNormalMap);
+    ImGui.SeparatorText("Pliki");
+    ImGui.Text("Przeciągnij PNG na okno jako:");
+    if (ImGui.RadioButton("tekstura", !dropAsNormalMap))
+        dropAsNormalMap = false;
+    ImGui.SameLine();
+    if (ImGui.RadioButton("mapa normalnych", dropAsNormalMap))
+        dropAsNormalMap = true;
+    if (dropMessage != "")
+        ImGui.TextWrapped(dropMessage);
     ImGui.SeparatorText("Ruch światła");
     ImGui.Checkbox("Pauza (Spacja)", ref lightPaused);
     // ujemne z: światło za sceną, oświetla spód powierzchni
     ImGui.SliderFloat("z światła", ref lightPath.Z, -500, 500);
     ImGui.Checkbox("Edycja krzywej", ref editPath);
     ImGui.End();
+    help.Draw();
     rlImGui.End();
 
     Raylib.EndDrawing();
@@ -201,11 +239,21 @@ void FillTriangle(Triangle t)
             float z = Barycentric.Interpolate(w, t.A.Pr.Z, t.B.Pr.Z, t.C.Pr.Z);
             // średnia wektorów jednostkowych jest krótsza niż 1 → normalizacja po interpolacji
             var N = Vector3.Normalize(Barycentric.Interpolate(w, t.A.Nr, t.B.Nr, t.C.Nr));
+            // oświetlenie dwustronne: widzimy spód (N ucieka od obserwatora) → normalna spodu to −N
+            if (N.Z < 0)
+                N = -N;
             var P = Barycentric.Interpolate(w, t.A.Pr, t.B.Pr, t.C.Pr);
-            var IO = useTexture
-                ? texture.Sample(Barycentric.Interpolate(w, t.A.U, t.B.U, t.C.U),
-                                 Barycentric.Interpolate(w, t.A.V, t.B.V, t.C.V))
-                : objectColor;
+            // u, v liczone raz — potrzebne i teksturze, i mapie normalnych
+            float u = Barycentric.Interpolate(w, t.A.U, t.B.U, t.C.U);
+            float v = Barycentric.Interpolate(w, t.A.V, t.B.V, t.C.V);
+            if (useNormalMap)
+            {
+                // kolumny M = [Pu, Pv, N] — po obrocie, zinterpolowane i znormalizowane
+                var Pu = Vector3.Normalize(Barycentric.Interpolate(w, t.A.Pur, t.B.Pur, t.C.Pur));
+                var Pv = Vector3.Normalize(Barycentric.Interpolate(w, t.A.Pvr, t.B.Pvr, t.C.Pvr));
+                N = NormalMap.Apply(N, Pu, Pv, normalMap.Sample(u, v));
+            }
+            var IO = useTexture ? texture.Sample(u, v) : objectColor;
             var I = Shader.Shade(N, P, lightPos, lightColor, IO, kd, ks, m);
             frame.SetPixel(x, y, z, FrameBuffer.Rgba((byte)(I.X * 255), (byte)(I.Y * 255), (byte)(I.Z * 255)));
         }
@@ -286,10 +334,10 @@ static void DrawMesh(List<Triangle> mesh)
     }
 }
 
-// Domyślna czcionka ImGui ma tylko ASCII — ładujemy TTF z polskimi literami (Latin Extended-A), greką i typografią.
+// Domyślna czcionka ImGui ma tylko ASCII — ładujemy TTF z polskimi literami (Latin Extended-A), greką, typografią, strzałkami i symbolami matematycznymi.
 static void LoadFont(string fileName, float size)
 {
-    ushort[] glyphRanges = [0x0020, 0x017F, 0x0370, 0x03FF, 0x2000, 0x206F, 0];
+    ushort[] glyphRanges = [0x0020, 0x017F, 0x0370, 0x03FF, 0x2000, 0x206F, 0x2190, 0x22FF, 0];
     // ImGui (C++) trzyma wskaźnik do tej tablicy, więc przypinamy ją na cały czas działania programu.
     var handle = GCHandle.Alloc(glyphRanges, GCHandleType.Pinned);
     string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", fileName);

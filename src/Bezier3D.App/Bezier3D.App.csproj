@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <None Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="..\..\DOKUMENTACJA.md" LogicalName="DOKUMENTACJA.md" />
   </ItemGroup>
 
 </Project>
