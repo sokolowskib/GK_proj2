@@ -49,9 +49,9 @@ public class HelpWindow
 
     private static string[] LoadReadme()
     {
-        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("DOKUMENTACJA.md");
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("README.md");
         if (stream == null)
-            return ["Brak dokumentacji (DOKUMENTACJA.md nie został osadzony)."];
+            return ["Brak dokumentacji (README.md nie został osadzony)."];
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd().Split('\n');
     }
