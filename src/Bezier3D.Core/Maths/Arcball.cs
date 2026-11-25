@@ -6,9 +6,7 @@ namespace Bezier3D.Core.Maths;
 public static class Arcball
 {
     /// <summary>
-    /// Piksel myszy → punkt na kuli jednostkowej (długość 1). Oś y odwrócona (ekran rośnie w dół).
-    /// Poza kołem o promieniu radius → punkt na brzegu kuli (z = 0).
-    /// </summary>
+    /// Piksel myszy → punkt na kuli jednostkowej (długość 1).    /// </summary>
     public static Vector3 MapToSphere(Vector2 mouse, Vector2 center, float radius)
     {
         var x = (mouse.X - center.X) / radius;
@@ -23,10 +21,6 @@ public static class Arcball
         return Vector3.Normalize(new Vector3(x, y, 0));
     }
 
-    /// <summary>
-    /// Obrót przenoszący p0 w p1: oś = p0 × p1, kąt = acos(p0 · p1).
-    /// Brak ruchu (oś ≈ 0) → Identity.
-    /// </summary>
     public static Mat3 Increment(Vector3 p0, Vector3 p1)
     {
         var axis = Vector3.Cross(p0, p1);

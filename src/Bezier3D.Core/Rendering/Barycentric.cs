@@ -12,7 +12,6 @@ public static class Barycentric
         return u.X * v.Y - u.Y * v.X;
     }
 
-    /// <summary>(α, β, γ) punktu p w trójkącie abc; α = pole(p, b, c) / pole(a, b, c) itd. Suma = 1.</summary>
     public static Vector3 Compute(Vector2 a, Vector2 b, Vector2 c, Vector2 p)
     {
         var abc = Cross(b - a, c - a);
@@ -23,13 +22,11 @@ public static class Barycentric
         return new Vector3(pbc / abc, pca / abc, pab / abc);
     }
 
-    /// <summary>α·a + β·b + γ·c, gdzie w = (α, β, γ).</summary>
     public static float Interpolate(Vector3 w, float a, float b, float c)
     {
         return w.X * a + w.Y * b + w.Z * c;
     }
 
-    /// <summary>α·a + β·b + γ·c, gdzie w = (α, β, γ).</summary>
     public static Vector3 Interpolate(Vector3 w, Vector3 a, Vector3 b, Vector3 c)
     {
         return w.X * a + w.Y * b + w.Z * c;

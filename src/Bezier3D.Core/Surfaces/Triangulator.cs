@@ -3,9 +3,7 @@ namespace Bezier3D.Core.Surfaces;
 public static class Triangulator
 {
     /// <summary>
-    /// Siatka (n+1)×(n+1) wierzchołków dla u, v = 0, 1/n, ..., 1; każdy kwadrat → 2 trójkąty, razem 2n².
-    /// Wierzchołki tworzone raz i współdzielone przez trójkąty.
-    /// </summary>
+    /// Siatka (n+1)×(n+1) wierzchołków dla u, v = 0, 1/n, ..., 1;    /// </summary>
     public static List<Triangle> Triangulate(BezierSurface surface, int n)
     {
         var grid = new MeshVertex[n + 1, n + 1];

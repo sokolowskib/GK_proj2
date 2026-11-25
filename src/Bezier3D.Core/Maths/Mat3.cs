@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Bezier3D.Core.Maths;
 
-/// <summary>Macierz 3×3 w konwencji kolumnowej: wektor mnożymy z prawej (w = M·v).</summary>
+/// <summary>Macierz 3×3 w konwencji kolumnowej</summary>
 public sealed class Mat3
 {
     private readonly float[,] m = new float[3, 3];
@@ -14,7 +14,6 @@ public sealed class Mat3
         set => m[row, col] = value;
     }
 
-    /// <summary>Nowa macierz jednostkowa (za każdym razem nowy obiekt, bo Mat3 jest modyfikowalna).</summary>
     public static Mat3 Identity
     {
         get {
@@ -26,7 +25,7 @@ public sealed class Mat3
         }
     }
 
-    /// <summary>M = [a b c]: a, b, c to kolumny.</summary>
+    /// <summary>M = [a b c]</summary>
     public static Mat3 FromColumns(Vector3 a, Vector3 b, Vector3 c)
     {
         var cols = new List<Vector3> { a, b, c };
@@ -41,7 +40,6 @@ public sealed class Mat3
         return M;
     }
 
-    /// <summary>Obrót o kąt angle (radiany) wokół osi axis, wzór Rodriguesa: R = I + sinθ·K + (1 − cosθ)·K².</summary>
     public static Mat3 Rotation(Vector3 axis, float angle)
     {
         Mat3 I = Identity;

@@ -14,7 +14,6 @@ public sealed class MeshVertex
     // po obrocie — liczone przy każdej zmianie orientacji
     public Vector3 Pr, Pur, Pvr, Nr;
 
-    /// <summary>Pr = R·P, Pur = R·Pu, Pvr = R·Pv, Nr = normalize(R·N) — zawsze od oryginałów.</summary>
     public void Rotate(Mat3 r)
     {
         Pr = r * P;
@@ -24,5 +23,5 @@ public sealed class MeshVertex
     }
 }
 
-/// <summary>Trójkąt wskazuje na wierzchołki współdzielone z sąsiadami (nie kopie).</summary>
+/// <summary>Trójkąt wskazuje na wierzchołki współdzielone z sąsiadami.</summary>
 public sealed record Triangle(MeshVertex A, MeshVertex B, MeshVertex C);

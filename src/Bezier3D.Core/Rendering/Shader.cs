@@ -5,11 +5,8 @@ namespace Bezier3D.Core.Rendering;
 public static class Shader
 {
     public static Vector3 Shade(Vector3 N, Vector3 P, Vector3 lightPos, Vector3 IL, Vector3 IO, float kd, float ks,
-                                float m) =>
-        // kierunek punktu od swiatla
-        Shade(N, Vector3.Normalize(lightPos - P), IL, IO, kd, ks, m);
+                                float m) => Shade(N, Vector3.Normalize(lightPos - P), IL, IO, kd, ks, m);
 
-    /// <summary>To samo, ale z gotowym kierunkiem do światła L (jednostkowy) — dla światła kierunkowego.</summary>
     public static Vector3 Shade(Vector3 N, Vector3 L, Vector3 IL, Vector3 IO, float kd, float ks, float m)
     {
         var NL = Vector3.Dot(N, L);

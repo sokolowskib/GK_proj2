@@ -4,7 +4,7 @@ using ImGuiNET;
 using Raylib_cs;
 namespace Bezier3D.App.UI;
 
-// Wyświetla DOKUMENTACJA.md osadzony w pliku wykonywalnym (EmbeddedResource w .csproj).
+// Wyświetla README.md osadzony w pliku wykonywalnym (EmbeddedResource w .csproj).
 public class HelpWindow
 {
     private readonly string[] _lines = LoadReadme();
