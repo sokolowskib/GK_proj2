@@ -70,4 +70,22 @@ public class ShaderTests
         var far = Shader.Shade(Up, Vector3.Zero, new(0, 0, 1000), White, Orange, 0.5f, 0.5f, 10);
         AssertClose(near, far);
     }
+
+    [Fact]
+    public void SpotOnAxisIsFull() =>
+        // punkt na osi reflektora → α = 0, cos = 1
+        Assert.Equal(1, Shader.Spot(new(0, 0, 100), new(0, 0, 10), 20), Eps);
+
+    [Fact]
+    public void SpotAt60DegreesIsCosPowM()
+    {
+        // reflektor w (0,0,100), punkt (100·√3, 0, 0) → α = 60°, cos = 1/2
+        var s = Shader.Spot(new(0, 0, 100), new(100 * MathF.Sqrt(3), 0, 0), 5);
+        Assert.Equal(MathF.Pow(0.5f, 5), s, Eps);
+    }
+
+    [Fact]
+    public void SpotBehindIsZero() =>
+        // punkt za reflektorem → α > 90°, nie świeci
+        Assert.Equal(0, Shader.Spot(new(0, 0, 100), new(0, 0, 200), 5), Eps);
 }

@@ -46,19 +46,27 @@ var canvasTex = Raylib.LoadTextureFromImage(Raylib.GenImageColor(CanvasSize, Can
 float kd = 0.5f, ks = 0.5f;
 int m = 10;
 var lightColor = Vector3.One;               // domyślnie białe
-var objectColor = new Vector3(1f, 0.55f, 0.2f);
-bool useTexture = false;
 var lightPath = DefaultLightPath();
 float lightT = 0;                           // parametr krzywej, rośnie z czasem i zawija się po 1
 const float LightSpeed = 0.1f;              // okrążenie co 10 s
 bool lightPaused = false;
 bool editPath = false;
 int draggedPoint = -1;                      // indeks przeciąganego punktu krzywej, −1 = żaden
-var lightPos = lightPath.At(0);
+var lightType = LightType.Point;
+string[] lightTypeNames = ["Kierunkowe", "Punktowe", "Reflektor"]; // kolejność jak w LightType
+int spotM = 20;                             // wykładnik reflektora, osobny od Phongowego m
+int lightCount = 1;
+Vector3[] lightPositions = [];              // liczone co klatkę z lightT
 var texture = LoadTexture(Path.Combine(AppContext.BaseDirectory, "Assets", "texture.png"));
-bool useNormalMap = false;
+// wygląd każdej powierzchni osobno; indeks ten sam co w surfaces i meshes
+var looks = surfaces.Select(_ => new SurfaceLook { Color = new(1f, 0.55f, 0.2f), Texture = texture }).ToList();
+string[] surfaceNames = surfaces.Select((_, i) => $"Powierzchnia {i}").ToArray();
+int selected = 0;                           // powierzchnia edytowana w panelu
+var normalSource = NormalSource.Geometry;   // naraz działa najwyżej jedna mapa
 var normalMap = LoadTexture(Path.Combine(AppContext.BaseDirectory, "Assets", "Tiles101_1K-PNG_NormalDX.png"));
-bool dropAsNormalMap = false;               // czym jest plik przeciągnięty na okno
+var heightMap = LoadTexture(Path.Combine(AppContext.BaseDirectory, "Assets", "Tiles101_1K-PNG_Displacement.png"));
+float heightK = 20;                         // różnice sąsiednich pikseli są rzędu 0.01 → k musi być duże
+var dropAs = DropTarget.Texture;            // czym jest plik przeciągnięty na okno
 string dropMessage = "";
 int n = 10;
 var meshes = surfaces.Select(s => Triangulator.Triangulate(s, n)).ToList();
@@ -88,7 +96,8 @@ while (!Raylib.WindowShouldClose())
     if (Raylib.IsMouseButtonPressed(MouseButton.Left) && mouse.X < CanvasSize)
     {
         // w trybie edycji kliknięcie blisko punktu krzywej łapie punkt; w innym miejscu nadal obracamy scenę
-        draggedPoint = editPath
+        // przy świetle kierunkowym krzywa jest schowana, więc nie da się jej łapać
+        draggedPoint = editPath && lightType != LightType.Directional
             ? lightPath.Points.FindIndex(q => Vector2.Distance(ToScreen(new Vector3(q, 0)), mouse) < 10)
             : -1;
         dragging = draggedPoint < 0;
@@ -118,10 +127,12 @@ while (!Raylib.WindowShouldClose())
         {
             var loaded = LoadTexture(path);
             // od razu włączamy to, co podmieniliśmy — widać efekt bez szukania checkboxa
-            if (dropAsNormalMap)
-                (normalMap, useNormalMap) = (loaded, true);
-            else
-                (texture, useTexture) = (loaded, true);
+            switch (dropAs)
+            {
+                case DropTarget.NormalMap: (normalMap, normalSource) = (loaded, NormalSource.NormalMap); break;
+                case DropTarget.HeightMap: (heightMap, normalSource) = (loaded, NormalSource.HeightMap); break;
+                default: (looks[selected].Texture, looks[selected].UseTexture) = (loaded, true); break;
+            }
             dropMessage = $"Wczytano: {Path.GetFileName(path)}";
         }
         catch (IOException e)
@@ -134,7 +145,10 @@ while (!Raylib.WindowShouldClose())
         lightPaused = !lightPaused;
     if (!lightPaused)
         lightT = (lightT + Raylib.GetFrameTime() * LightSpeed) % 1;
-    lightPos = lightPath.At(lightT);
+    // równe odstępy w parametrze t, nie w długości łuku — wystarcza na „mniej więcej równo”
+    lightPositions = Enumerable.Range(0, lightCount)
+                               .Select(k => lightPath.At((lightT + k / (float)lightCount) % 1))
+                               .ToArray();
 
     if (Raylib.IsKeyPressed(KeyboardKey.R))
     {
@@ -148,9 +162,9 @@ while (!Raylib.WindowShouldClose())
     if (showFill)
     {
         frame.Clear(FrameBuffer.Rgba(245, 245, 245));
-        foreach (var mesh in meshes)
-            foreach (var t in mesh)
-                FillTriangle(t);
+        for (int i = 0; i < meshes.Count; i++)
+            foreach (var t in meshes[i])
+                FillTriangle(t, looks[i]);
         Raylib.UpdateTexture(canvasTex, frame.Color);
         Raylib.DrawTexture(canvasTex, 0, 0, Color.White);
     }
@@ -163,7 +177,8 @@ while (!Raylib.WindowShouldClose())
         foreach (var s in surfaces)
             DrawControlNet(s, R);
 
-    DrawLightPath(lightPath, lightPos, editPath);
+    if (lightType != LightType.Directional)
+        DrawLightPath(lightPath, lightPositions, editPath);
 
     rlImGui.Begin();
     ImGui.SetNextWindowPos(new Vector2(CanvasSize, 0));
@@ -188,29 +203,54 @@ while (!Raylib.WindowShouldClose())
     ImGui.SliderFloat("ks", ref ks, 0, 1);
     ImGui.SliderInt("m", ref m, 1, 100);
     ImGui.ColorEdit3("Kolor światła", ref lightColor);
+    ImGui.Combo("##powierzchnia", ref selected, surfaceNames, surfaceNames.Length);
+    var look = looks[selected];
     ImGui.Text("Kolor obiektu:");
-    if (ImGui.RadioButton("Jednolity", !useTexture))
-        useTexture = false;
+    if (ImGui.RadioButton("Jednolity", !look.UseTexture))
+        look.UseTexture = false;
     ImGui.SameLine();
-    if (ImGui.RadioButton("Tekstura", useTexture))
-        useTexture = true;
-    if (!useTexture)
-        ImGui.ColorEdit3("Kolor obiektu", ref objectColor);
-    ImGui.Checkbox("Mapa normalnych", ref useNormalMap);
+    if (ImGui.RadioButton("Tekstura", look.UseTexture))
+        look.UseTexture = true;
+    if (!look.UseTexture)
+        ImGui.ColorEdit3("Kolor obiektu", ref look.Color);
+    ImGui.Text("Normalna:");
+    if (ImGui.RadioButton("Z siatki", normalSource == NormalSource.Geometry))
+        normalSource = NormalSource.Geometry;
+    ImGui.SameLine();
+    if (ImGui.RadioButton("Normalne", normalSource == NormalSource.NormalMap))
+        normalSource = NormalSource.NormalMap;
+    ImGui.SameLine();
+    if (ImGui.RadioButton("Wysokości", normalSource == NormalSource.HeightMap))
+        normalSource = NormalSource.HeightMap;
+    if (normalSource == NormalSource.HeightMap)
+        ImGui.SliderFloat("k", ref heightK, 0, 100);
     ImGui.SeparatorText("Pliki");
     ImGui.Text("Przeciągnij PNG na okno jako:");
-    if (ImGui.RadioButton("tekstura", !dropAsNormalMap))
-        dropAsNormalMap = false;
+    if (ImGui.RadioButton("tekstura", dropAs == DropTarget.Texture))
+        dropAs = DropTarget.Texture;
     ImGui.SameLine();
-    if (ImGui.RadioButton("mapa normalnych", dropAsNormalMap))
-        dropAsNormalMap = true;
+    if (ImGui.RadioButton("normalne", dropAs == DropTarget.NormalMap))
+        dropAs = DropTarget.NormalMap;
+    ImGui.SameLine();
+    if (ImGui.RadioButton("wysokości", dropAs == DropTarget.HeightMap))
+        dropAs = DropTarget.HeightMap;
     if (dropMessage != "")
         ImGui.TextWrapped(dropMessage);
     ImGui.SeparatorText("Ruch światła");
-    ImGui.Checkbox("Pauza (Spacja)", ref lightPaused);
-    // ujemne z: światło za sceną, oświetla spód powierzchni
-    ImGui.SliderFloat("z światła", ref lightPath.Z, -500, 500);
-    ImGui.Checkbox("Edycja krzywej", ref editPath);
+    int lightTypeIndex = (int)lightType;
+    if (ImGui.Combo("Typ światła", ref lightTypeIndex, lightTypeNames, lightTypeNames.Length))
+        lightType = (LightType)lightTypeIndex;
+    // światło kierunkowe nie ma pozycji — suwaki ruchu nic by nie zmieniały
+    if (lightType != LightType.Directional)
+    {
+        ImGui.Checkbox("Pauza (Spacja)", ref lightPaused);
+        ImGui.SliderInt("Liczba świateł", ref lightCount, 1, 4);
+        if (lightType == LightType.Spot)
+            ImGui.SliderInt("m reflektora", ref spotM, 5, 100);
+        // ujemne z: światło za sceną, oświetla spód powierzchni
+        ImGui.SliderFloat("z światła", ref lightPath.Z, -500, 500);
+        ImGui.Checkbox("Edycja krzywej", ref editPath);
+    }
     ImGui.End();
     help.Draw();
     rlImGui.End();
@@ -226,8 +266,8 @@ return 0;
 // Rzut prostokątny: odrzucamy z; początek układu w środku płótna, oś y w górę.
 static Vector2 ToScreen(Vector3 p) => new(CanvasSize / 2f + p.X, CanvasSize / 2f - p.Y);
 
-// nie static: korzysta z parametrów światła i koloru obiektu z panelu
-void FillTriangle(Triangle t)
+// nie static: korzysta z parametrów światła z panelu
+void FillTriangle(Triangle t, SurfaceLook look)
 {
     Vector2 a = ToScreen(t.A.Pr), b = ToScreen(t.B.Pr), c = ToScreen(t.C.Pr);
     TriangleFiller.Fill(a, b, c, (y, x0, x1) =>
@@ -246,15 +286,28 @@ void FillTriangle(Triangle t)
             // u, v liczone raz — potrzebne i teksturze, i mapie normalnych
             float u = Barycentric.Interpolate(w, t.A.U, t.B.U, t.C.U);
             float v = Barycentric.Interpolate(w, t.A.V, t.B.V, t.C.V);
-            if (useNormalMap)
+            if (normalSource != NormalSource.Geometry)
             {
-                // kolumny M = [Pu, Pv, N] — po obrocie, zinterpolowane i znormalizowane
+                // Pu, Pv po obrocie, zinterpolowane i znormalizowane — wspólne dla obu map
                 var Pu = Vector3.Normalize(Barycentric.Interpolate(w, t.A.Pur, t.B.Pur, t.C.Pur));
                 var Pv = Vector3.Normalize(Barycentric.Interpolate(w, t.A.Pvr, t.B.Pvr, t.C.Pvr));
-                N = NormalMap.Apply(N, Pu, Pv, normalMap.Sample(u, v));
+                N = normalSource == NormalSource.NormalMap
+                    ? NormalMap.Apply(N, Pu, Pv, normalMap.Sample(u, v))
+                    : HeightMap.Apply(N, Pu, Pv, heightMap, u, v, heightK);
             }
-            var IO = useTexture ? texture.Sample(u, v) : objectColor;
-            var I = Shader.Shade(N, P, lightPos, lightColor, IO, kd, ks, m);
+            var IO = look.UseTexture ? look.Texture.Sample(u, v) : look.Color;
+            // wkłady świateł się sumują; każdy ≥ 0, więc obcięcie w Shade nie zmienia wyniku po obcięciu sumy
+            var I = Vector3.Zero;
+            if (lightType == LightType.Directional)
+                I = Shader.Shade(N, Vector3.UnitZ, lightColor, IO, kd, ks, m); // z nieskończoności, od strony obserwatora
+            else
+                foreach (var lightPos in lightPositions)
+                {
+                    // reflektor: I_ref·cos(α)^m, punktowe świecą pełnym kolorem
+                    var IL = lightType == LightType.Spot ? lightColor * Shader.Spot(lightPos, P, spotM) : lightColor;
+                    I += Shader.Shade(N, P, lightPos, IL, IO, kd, ks, m);
+                }
+            I = Vector3.Min(I, Vector3.One);
             frame.SetPixel(x, y, z, FrameBuffer.Rgba((byte)(I.X * 255), (byte)(I.Y * 255), (byte)(I.Z * 255)));
         }
     });
@@ -304,7 +357,7 @@ static LightPath DefaultLightPath()
     return new([(ring[^1] + ring[0]) / 2, .. ring], 400);
 }
 
-static void DrawLightPath(LightPath path, Vector3 light, bool editing)
+static void DrawLightPath(LightPath path, Vector3[] lights, bool editing)
 {
     const int Segments = 100;
     for (int i = 0; i < Segments; i++)
@@ -318,9 +371,12 @@ static void DrawLightPath(LightPath path, Vector3 light, bool editing)
             Raylib.DrawCircleV(q, 6, Color.Maroon);
         }
 
-    var l = ToScreen(light);
-    Raylib.DrawCircleV(l, 9, Color.Black);
-    Raylib.DrawCircleV(l, 7, Color.Yellow);
+    foreach (var light in lights)
+    {
+        var l = ToScreen(light);
+        Raylib.DrawCircleV(l, 9, Color.Black);
+        Raylib.DrawCircleV(l, 7, Color.Yellow);
+    }
 }
 
 static void DrawMesh(List<Triangle> mesh)
@@ -342,4 +398,16 @@ static void LoadFont(string fileName, float size)
     var handle = GCHandle.Alloc(glyphRanges, GCHandleType.Pinned);
     string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", fileName);
     ImGui.GetIO().Fonts.AddFontFromFileTTF(path, size, null, handle.AddrOfPinnedObject());
+}
+
+enum LightType { Directional, Point, Spot }
+enum NormalSource { Geometry, NormalMap, HeightMap }
+enum DropTarget { Texture, NormalMap, HeightMap }
+
+// klasa, nie struct: panel edytuje wygląd przez referencję z listy
+class SurfaceLook
+{
+    public Vector3 Color;
+    public required Texture Texture;
+    public bool UseTexture;
 }

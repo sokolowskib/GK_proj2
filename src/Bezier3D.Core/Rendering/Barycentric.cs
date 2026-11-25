@@ -6,7 +6,7 @@ namespace Bezier3D.Core.Rendering;
 /// wierzchołków.</summary>
 public static class Barycentric
 {
-    /// <summary>Iloczyn wektorowy 2D: u.X·v.Y − u.Y·v.X (podwójne pole ze znakiem).</summary>
+    /// <summary>Iloczyn wektorowy 2D: u.X·v.Y − u.Y·v.X </summary>
     public static float Cross(Vector2 u, Vector2 v)
     {
         return u.X * v.Y - u.Y * v.X;

@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="Program_copy.cs" />
     <None Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="..\..\README.md" LogicalName="README.md" />
   </ItemGroup>
